@@ -15,14 +15,24 @@ const FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded';
  * @param data
  */
 export const login = (data: any) => {
+    //包裹用户输入的用户名和密码，生成授权信息头部
     const basicAuth = 'Basic ' + window.btoa(import.meta.env.VITE_OAUTH2_PASSWORD_CLIENT);
+
+    //设置一个名为basicAuth的会话变量。会话变量是一种在Web应用程序中用于存储和共享数据的机制。
+    //它们在用户会话期间一直存在，并且可以在整个应用程序的不同页面和请求之间进行访问和传递。
     Session.set('basicAuth', basicAuth);
+
+    //为加密做准备
     let encPassword = data.password;
+
     // 密码加密
+    //环境变量正确，则加密
     if (import.meta.env.VITE_PWD_ENC_KEY) {
         encPassword = other.encryption(data.password, import.meta.env.VITE_PWD_ENC_KEY);
     }
+    //返回一个post请求的发起，修改密码为加密密码
     return request({
+        //url是由服务器处理这部分逻辑的位置决定的
         url: '/auth/oauth2/token',
         method: 'post',
         data: {...data, password: encPassword},
@@ -34,6 +44,7 @@ export const login = (data: any) => {
     });
 };
 
+//手机登录
 export const loginByMobile = (mobile: any, code: any) => {
     const grant_type = 'mobile';
     const scope = 'server';
@@ -52,6 +63,7 @@ export const loginByMobile = (mobile: any, code: any) => {
     });
 };
 
+//社交帐号登录
 export const loginBySocial = (state: string, code: string) => {
     const grant_type = 'mobile';
     const scope = 'server';

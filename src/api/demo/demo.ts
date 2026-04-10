@@ -46,17 +46,18 @@ export function getObj(obj?: Object) {
  */
 export function getProcess(query?: Object) {
   return request({
-    url: 'demo/demo/process',
+    url: '/demo/demo/process',
     method: 'get',
     params: query
-  }).then(response => {
+  }).then((response: any) => {
     if (Array.isArray(response.data)) {
       return response.data;
     } else {
       throw new Error('返回的数据不是数组');
     }
-  }).catch(error => {
-    throw new Error('请求出错：' + error.message);
+  }).catch((error: any) => {
+    const msg = error?.msg ?? error?.message ?? error?.data?.msg ?? String(error);
+    throw new Error('请求出错：' + msg);
   });
 }
 
@@ -72,8 +73,9 @@ export function getObjlist(query?: Object) {
     } else {
       throw new Error('返回的数据不是数组');
     }
-  }).catch(error => {
-    throw new Error('请求出错：' + error.message);
+  }).catch((error: any) => {
+    const msg = error?.msg ?? error?.message ?? error?.data?.msg ?? String(error);
+    throw new Error('请求出错：' + msg);
   });
 }
 
@@ -83,14 +85,15 @@ export function getColumn(query?: Object) {
     url: '/demo/demo/column',
     method: 'get',
     params: query
-  }).then(response => {
+  }).then((response: any) => {
     if (Array.isArray(response.data)) {
       return response.data;
     } else {
       throw new Error('返回的数据不是数组');
     }
-  }).catch(error => {
-    throw new Error('请求出错：' + error.message);
+  }).catch((error: any) => {
+    const msg = error?.msg ?? error?.message ?? error?.data?.msg ?? String(error);
+    throw new Error('请求出错：' + msg);
   });
 }
 
@@ -100,14 +103,15 @@ export function getTimeList(query?: Object) {
     url: '/demo/demo/time',
     method: 'get',
     params: query
-  }).then(response => {
+  }).then((response: any) => {
     if (Array.isArray(response.data)) {
       return response.data;
     } else {
       throw new Error('返回的数据不是数组');
     }
-  }).catch(error => {
-    throw new Error('请求出错：' + error.message);
+  }).catch((error: any) => {
+    const msg = error?.msg ?? error?.message ?? error?.data?.msg ?? String(error);
+    throw new Error('请求出错：' + msg);
   });
 }
 

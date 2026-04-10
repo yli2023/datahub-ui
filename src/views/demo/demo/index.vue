@@ -24,31 +24,50 @@
                   type="textarea"
                   :rows="2"
                   placeholder="可选：追问（将带上文对话历史）。首次可直接点「AI 智能分析」。"
+                  @keydown.enter.exact.prevent="handleFollowUpEnter"
                 />
-                <el-collapse v-if="aiResult" class="mt-3">
-                  <el-collapse-item title="分析结果" name="1">
-                    <p class="text-sm text-gray-600 mb-2">{{ aiResult.summary }}</p>
+                <div class="mt-2 ai-follow-up-actions">
+                  <el-button
+                    type="primary"
+                    plain
+                    size="small"
+                    :loading="aiLoading"
+                    :disabled="!followUpInput.trim()"
+                    @click="submitFollowUp"
+                  >
+                    发送追问
+                  </el-button>
+                  <span class="text-xs text-gray-400">Enter 发送，Shift+Enter 换行</span>
+                </div>
+                <el-collapse v-if="analysisRecords.length" class="mt-3">
+                  <el-collapse-item
+                    v-for="(record, idx) in analysisRecords"
+                    :key="record.id"
+                    :title="`分析结果 #${analysisRecords.length - idx}（${record.questionLabel}）`"
+                    :name="record.id"
+                  >
+                    <p class="text-sm text-gray-600 mb-2">{{ record.result.summary }}</p>
                     <el-descriptions :column="1" border size="small" class="mb-2">
-                      <el-descriptions-item label="置信度">{{ aiResult.confidence?.toFixed?.(2) ?? aiResult.confidence }}</el-descriptions-item>
-                      <el-descriptions-item label="模型">{{ aiResult.meta?.model }} / LLM: {{ aiResult.meta?.usedLlm ? '是' : '否' }}</el-descriptions-item>
-                      <el-descriptions-item label="耗时 ms">{{ aiResult.meta?.latencyMs }}</el-descriptions-item>
-                      <el-descriptions-item label="Prompt">{{ aiResult.meta?.promptVersion }} / trace {{ aiResult.meta?.traceId }}</el-descriptions-item>
+                      <el-descriptions-item label="置信度">{{ record.result.confidence?.toFixed?.(2) ?? record.result.confidence }}</el-descriptions-item>
+                      <el-descriptions-item label="模型">{{ record.result.meta?.model }} / LLM: {{ record.result.meta?.usedLlm ? '是' : '否' }}</el-descriptions-item>
+                      <el-descriptions-item label="耗时 ms">{{ record.result.meta?.latencyMs }}</el-descriptions-item>
+                      <el-descriptions-item label="Prompt">{{ record.result.meta?.promptVersion }} / trace {{ record.result.meta?.traceId }}</el-descriptions-item>
                     </el-descriptions>
-                    <div v-if="aiResult.anomalyNotes?.length" class="mb-2">
+                    <div v-if="record.result.anomalyNotes?.length" class="mb-2">
                       <b>异常提示</b>
-                      <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in aiResult.anomalyNotes" :key="'a'+i">{{ x }}</li></ul>
+                      <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in record.result.anomalyNotes" :key="'a'+record.id+i">{{ x }}</li></ul>
                     </div>
-                    <div v-if="aiResult.possibleCauses?.length" class="mb-2">
+                    <div v-if="record.result.possibleCauses?.length" class="mb-2">
                       <b>可能原因</b>
-                      <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in aiResult.possibleCauses" :key="'c'+i">{{ x }}</li></ul>
+                      <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in record.result.possibleCauses" :key="'c'+record.id+i">{{ x }}</li></ul>
                     </div>
-                    <div v-if="aiResult.actions?.length" class="mb-2">
+                    <div v-if="record.result.actions?.length" class="mb-2">
                       <b>建议动作</b>
-                      <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in aiResult.actions" :key="'t'+i">{{ x }}</li></ul>
+                      <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in record.result.actions" :key="'t'+record.id+i">{{ x }}</li></ul>
                     </div>
-                    <div v-if="aiResult.citations?.length">
+                    <div v-if="record.result.citations?.length">
                       <b>知识库引用 (RAG)</b>
-                      <el-card v-for="c in aiResult.citations" :key="c.id" class="mb-2" shadow="never">
+                      <el-card v-for="c in record.result.citations" :key="record.id + c.id" class="mb-2" shadow="never">
                         <div class="text-sm font-medium">{{ c.title }} <span class="text-gray-400">score={{ c.score?.toFixed?.(3) ?? c.score }}</span></div>
                         <pre class="text-xs whitespace-pre-wrap mt-1">{{ c.excerpt }}</pre>
                       </el-card>
@@ -220,6 +239,7 @@ const aiLoading = ref(false);
 const aiResult = ref<AiAnalysisResponse | null>(null);
 const followUpInput = ref('');
 const conversationHistory = ref<{ role: string; content: string }[]>([]);
+const analysisRecords = ref<{ id: string; questionLabel: string; result: AiAnalysisResponse }[]>([]);
 
 const onChartDialogOpen = () => {
   makeChart1(tableNameParam.value, y1Name, y2Name, num);
@@ -229,6 +249,25 @@ const clearAiSession = () => {
   conversationHistory.value = [];
   aiResult.value = null;
   followUpInput.value = '';
+  analysisRecords.value = [];
+};
+
+const submitFollowUp = async () => {
+  if (!followUpInput.value.trim()) {
+    return;
+  }
+  if (!aiResult.value && conversationHistory.value.length === 0) {
+    useMessage().warning('请先点击一次「AI 智能分析」生成首轮结果，再进行追问。');
+    return;
+  }
+  await runAiAnalysis();
+};
+
+const handleFollowUpEnter = async (event: KeyboardEvent) => {
+  if (event.isComposing) {
+    return;
+  }
+  await submitFollowUp();
 };
 
 const runAiAnalysis = async () => {
@@ -253,6 +292,12 @@ const runAiAnalysis = async () => {
       conversationHistory: [...conversationHistory.value],
     });
     aiResult.value = res;
+    const q = (fu || '').trim();
+    analysisRecords.value.unshift({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      questionLabel: q ? (q.length > 24 ? `${q.slice(0, 24)}...` : q) : '首轮分析',
+      result: res,
+    });
     const assistantText = res.plainText || res.summary || '';
     if (fu) {
       conversationHistory.value.push({ role: 'user', content: fu });
@@ -379,5 +424,11 @@ const makeChart1 = async (property1: any, property2: any, property3: any, proper
   color: var(--el-text-color-secondary);
   font-size: 14px;
   margin-bottom: 20px;
+}
+
+.ai-follow-up-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 </style>

@@ -17,7 +17,15 @@
                 <el-space wrap>
                   <el-button type="primary" :loading="aiLoading" @click="runAiAnalysis">AI 智能分析</el-button>
                   <el-button @click="clearAiSession" :disabled="aiLoading">清空对话</el-button>
+                  <el-button @click="exportAiSession" :disabled="!analysisRecords.length">导出对话</el-button>
+                  <el-button @click="exportAiSessionMarkdown" :disabled="!analysisRecords.length">导出 Markdown</el-button>
                 </el-space>
+                <div class="mt-2 ai-history-config">
+                  <span class="text-xs text-gray-500">显示最近</span>
+                  <el-input-number v-model="maxDisplayRecords" :min="1" :max="50" :step="1" size="small" />
+                  <span class="text-xs text-gray-500">轮</span>
+                  <span v-if="hiddenRecordCount > 0" class="text-xs text-gray-400">（已折叠 {{ hiddenRecordCount }} 轮更早记录）</span>
+                </div>
                 <el-input
                   v-model="followUpInput"
                   class="mt-2"
@@ -39,20 +47,18 @@
                   </el-button>
                   <span class="text-xs text-gray-400">Enter 发送，Shift+Enter 换行</span>
                 </div>
-                <el-collapse v-if="analysisRecords.length" class="mt-3">
+                <el-collapse v-if="displayedAnalysisRecords.length" class="mt-3">
                   <el-collapse-item
-                    v-for="(record, idx) in analysisRecords"
+                    v-for="(record, idx) in displayedAnalysisRecords"
                     :key="record.id"
                     :title="`分析结果 #${analysisRecords.length - idx}（${record.questionLabel}）`"
                     :name="record.id"
                   >
-                    <p class="text-sm text-gray-600 mb-2">{{ record.result.summary }}</p>
-                    <el-descriptions :column="1" border size="small" class="mb-2">
-                      <el-descriptions-item label="置信度">{{ record.result.confidence?.toFixed?.(2) ?? record.result.confidence }}</el-descriptions-item>
-                      <el-descriptions-item label="模型">{{ record.result.meta?.model }} / LLM: {{ record.result.meta?.usedLlm ? '是' : '否' }}</el-descriptions-item>
-                      <el-descriptions-item label="耗时 ms">{{ record.result.meta?.latencyMs }}</el-descriptions-item>
-                      <el-descriptions-item label="Prompt">{{ record.result.meta?.promptVersion }} / trace {{ record.result.meta?.traceId }}</el-descriptions-item>
-                    </el-descriptions>
+                    <div class="text-xs text-gray-500 mb-2">问题：{{ record.question || '首轮分析' }}</div>
+                    <div class="text-sm text-gray-700 mb-2">回答：{{ record.result.summary }}</div>
+                    <div v-if="hasDiagnosis(record.result)" class="mb-2">
+                      <b>诊断细节</b>
+                    </div>
                     <div v-if="record.result.anomalyNotes?.length" class="mb-2">
                       <b>异常提示</b>
                       <ul class="list-disc pl-5 text-sm"><li v-for="(x,i) in record.result.anomalyNotes" :key="'a'+record.id+i">{{ x }}</li></ul>
@@ -67,11 +73,21 @@
                     </div>
                     <div v-if="record.result.citations?.length">
                       <b>知识库引用 (RAG)</b>
-                      <el-card v-for="c in record.result.citations" :key="record.id + c.id" class="mb-2" shadow="never">
+                      <el-card v-for="c in citationsPreview(record.result.citations)" :key="record.id + c.id" class="mb-2" shadow="never">
                         <div class="text-sm font-medium">{{ c.title }} <span class="text-gray-400">score={{ c.score?.toFixed?.(3) ?? c.score }}</span></div>
                         <pre class="text-xs whitespace-pre-wrap mt-1">{{ c.excerpt }}</pre>
                       </el-card>
+                      <div v-if="record.result.citations.length > 2" class="text-xs text-gray-400">其余 {{ record.result.citations.length - 2 }} 条引用已折叠在导出文件中。</div>
                     </div>
+                    <details class="ai-meta mt-2">
+                      <summary>查看技术元数据</summary>
+                      <el-descriptions :column="1" border size="small" class="mb-2 mt-2">
+                        <el-descriptions-item label="置信度">{{ record.result.confidence?.toFixed?.(2) ?? record.result.confidence }}</el-descriptions-item>
+                        <el-descriptions-item label="模型">{{ record.result.meta?.model }} / LLM: {{ record.result.meta?.usedLlm ? '是' : '否' }}</el-descriptions-item>
+                        <el-descriptions-item label="耗时 ms">{{ record.result.meta?.latencyMs }}</el-descriptions-item>
+                        <el-descriptions-item label="Prompt">{{ record.result.meta?.promptVersion }} / trace {{ record.result.meta?.traceId }}</el-descriptions-item>
+                      </el-descriptions>
+                    </details>
                   </el-collapse-item>
                 </el-collapse>
               </div>
@@ -239,7 +255,16 @@ const aiLoading = ref(false);
 const aiResult = ref<AiAnalysisResponse | null>(null);
 const followUpInput = ref('');
 const conversationHistory = ref<{ role: string; content: string }[]>([]);
-const analysisRecords = ref<{ id: string; questionLabel: string; result: AiAnalysisResponse }[]>([]);
+const analysisRecords = ref<{ id: string; createdAt: string; question: string; questionLabel: string; result: AiAnalysisResponse }[]>([]);
+const maxDisplayRecords = ref(5);
+const displayedAnalysisRecords = computed(() => analysisRecords.value.slice(0, maxDisplayRecords.value));
+const hiddenRecordCount = computed(() => Math.max(0, analysisRecords.value.length - displayedAnalysisRecords.value.length));
+const exportRecordsAsc = computed(() => [...analysisRecords.value].reverse());
+
+const hasDiagnosis = (r: AiAnalysisResponse) =>
+  Boolean((r.anomalyNotes && r.anomalyNotes.length) || (r.possibleCauses && r.possibleCauses.length) || (r.actions && r.actions.length));
+
+const citationsPreview = (citations: AiAnalysisResponse['citations']) => (citations || []).slice(0, 2);
 
 const onChartDialogOpen = () => {
   makeChart1(tableNameParam.value, y1Name, y2Name, num);
@@ -250,6 +275,105 @@ const clearAiSession = () => {
   aiResult.value = null;
   followUpInput.value = '';
   analysisRecords.value = [];
+};
+
+const exportAiSession = () => {
+  if (!analysisRecords.value.length) {
+    useMessage().warning('当前没有可导出的对话记录');
+    return;
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    tableName: tableNameParam.value,
+    y1Name: String(y1Name.value ?? ''),
+    y2Name: String(y2Name.value ?? ''),
+    startTime: String(start.value ?? ''),
+    endTime: String(end.value ?? ''),
+    records: exportRecordsAsc.value.map((r) => ({
+      id: r.id,
+      createdAt: r.createdAt,
+      question: r.question,
+      result: r.result,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai-session-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  useMessage().success('对话记录已导出');
+};
+
+const exportAiSessionMarkdown = () => {
+  if (!analysisRecords.value.length) {
+    useMessage().warning('当前没有可导出的对话记录');
+    return;
+  }
+  const header = [
+    '# AI 分析对话导出',
+    '',
+    `- 导出时间: ${new Date().toLocaleString()}`,
+    `- 表名: ${tableNameParam.value || '-'}`,
+    `- Y1: ${String(y1Name.value ?? '-')}`,
+    `- Y2: ${String(y2Name.value ?? '-')}`,
+    `- 开始时间: ${String(start.value ?? '-')}`,
+    `- 结束时间: ${String(end.value ?? '-')}`,
+    '',
+  ].join('\n');
+
+  let prevCitationSig = '';
+  const body = exportRecordsAsc.value.map((r, idx) => {
+    const result = r.result;
+    const notes = (result.anomalyNotes || []).map((x) => `- ${x}`).join('\n');
+    const causes = (result.possibleCauses || []).map((x) => `- ${x}`).join('\n');
+    const actions = (result.actions || []).map((x) => `- ${x}`).join('\n');
+    const citationSig = JSON.stringify((result.citations || []).map((c) => `${c.title}:${(c.score ?? 0).toFixed?.(3) ?? c.score}`));
+    const citations = (result.citations || [])
+      .map((c) => `- ${c.title} (score=${(c.score ?? 0).toFixed?.(3) ?? c.score})\n  - ${c.excerpt}`)
+      .join('\n');
+    const citationSection = !citations
+      ? []
+      : citationSig === prevCitationSig
+        ? ['### 知识库引用 (RAG)', '与上一轮相同，已省略。', '']
+        : ['### 知识库引用 (RAG)', citations, ''];
+    prevCitationSig = citationSig;
+    return [
+      `## 第 ${idx + 1} 轮`,
+      '',
+      `- 时间: ${new Date(r.createdAt).toLocaleString()}`,
+      `- 问题: ${r.question || '首轮分析'}`,
+      '',
+      '### AI回答',
+      result.summary || '-',
+      '',
+      ...(notes ? ['### 异常提示', notes, ''] : []),
+      ...(causes ? ['### 可能原因', causes, ''] : []),
+      ...(actions ? ['### 建议动作', actions, ''] : []),
+      ...citationSection,
+      '### 技术元数据',
+      `- 置信度: ${result.confidence?.toFixed?.(2) ?? result.confidence}`,
+      `- 模型: ${result.meta?.model} / LLM: ${result.meta?.usedLlm ? '是' : '否'}`,
+      `- 耗时(ms): ${result.meta?.latencyMs}`,
+      `- Trace: ${result.meta?.traceId}`,
+      '',
+    ].join('\n');
+  }).join('\n');
+
+  const markdown = `${header}${body}`;
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai-session-${Date.now()}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  useMessage().success('Markdown 已导出');
 };
 
 const submitFollowUp = async () => {
@@ -295,6 +419,8 @@ const runAiAnalysis = async () => {
     const q = (fu || '').trim();
     analysisRecords.value.unshift({
       id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      question: q,
       questionLabel: q ? (q.length > 24 ? `${q.slice(0, 24)}...` : q) : '首轮分析',
       result: res,
     });
@@ -430,5 +556,17 @@ const makeChart1 = async (property1: any, property2: any, property3: any, proper
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.ai-history-config {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-meta summary {
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>
